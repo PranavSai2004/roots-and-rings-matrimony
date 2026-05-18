@@ -2,7 +2,6 @@ const express = require("express");
 const dotenv = require("dotenv");
 const cors = require("cors");
 const helmet = require("helmet");
-const mongoSanitize = require("express-mongo-sanitize");
 
 dotenv.config();
 
@@ -147,11 +146,6 @@ app.use(cors(corsOptions));
 // SANITIZATION
 // ========================================
 
-app.use(
-  mongoSanitize({
-    replaceWith: "_",
-  })
-);
 
 // ========================================
 // DATABASE CONNECTION
