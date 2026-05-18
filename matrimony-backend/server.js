@@ -57,7 +57,6 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.options("/*", cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 // Custom sanitization for Express 5 (Avoids req.query getter issue)
