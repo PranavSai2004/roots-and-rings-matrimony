@@ -104,7 +104,7 @@ if (isVercelPreview) {
 console.error("CORS BLOCKED:", origin);
 
 return callback(
-  new Error(`CORS blocked for origin: ${origin}`)
+  new Error("CORS blocked for origin: " + origin)
 );
 
 ```
