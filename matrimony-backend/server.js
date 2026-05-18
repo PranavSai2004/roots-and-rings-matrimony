@@ -142,8 +142,6 @@ optionsSuccessStatus: 200,
 // CORS MUST COME BEFORE ROUTES
 app.use(cors(corsOptions));
 
-// Handle preflight requests
-app.options("/.*/", cors(corsOptions));
 
 // ========================================
 // SANITIZATION
