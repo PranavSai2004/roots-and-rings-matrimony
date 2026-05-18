@@ -147,21 +147,11 @@ app.use(cors(corsOptions));
 // SANITIZATION
 // ========================================
 
-app.use((req, res, next) => {
-try {
-if (req.body) {
-mongoSanitize.sanitize(req.body);
-}
-
-```
-next();
-```
-
-} catch (error) {
-console.error("Sanitization Error:", error);
-next();
-}
-});
+app.use(
+  mongoSanitize({
+    replaceWith: "_",
+  })
+);
 
 // ========================================
 // DATABASE CONNECTION
