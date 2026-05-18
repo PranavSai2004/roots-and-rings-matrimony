@@ -20,6 +20,8 @@ const userInterestRoutes = require("./routes/userInterestRoutes");
 
 const app = express();
 
+app.set('trust proxy', 1); // Trust the Render proxy
+
 app.use(helmet());
 app.use(cors({
   origin: (origin, callback) => {

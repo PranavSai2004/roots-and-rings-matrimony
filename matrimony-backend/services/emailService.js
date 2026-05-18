@@ -8,15 +8,10 @@ const OTP_MAX_ATTEMPTS = parseInt(process.env.OTP_MAX_ATTEMPTS) || 5;
 // Create reusable transporter
 const createTransporter = () => {
   return nodemailer.createTransport({
-    host: 'smtp.gmail.com',
-    port: 587,
-    secure: false, // true for 465, false for 587
+    service: 'gmail',
     auth: {
       user: process.env.EMAIL_USER,
       pass: process.env.EMAIL_APP_PASSWORD,
-    },
-    tls: {
-      rejectUnauthorized: false, // bypass self-signed cert (antivirus/proxy SSL interception)
     },
   });
 };
