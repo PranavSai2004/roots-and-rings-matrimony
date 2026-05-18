@@ -24,15 +24,22 @@ app.set('trust proxy', 1); // Trust the Render proxy
 
 app.use(helmet());
 const allowedOrigins = [
+  "https://roots-and-rings-matrimony.vercel.app",
+  "https://roots-and-rings-admin.vercel.app",
   "http://localhost:5173",
   "http://localhost:5174",
-  "http://localhost:3000",
-  "https://roots-and-rings.vercel.app",
-  "https://roots-and-rings-admin.vercel.app",
-  "https://roots-and-rings-client.vercel.app",
-  "https://rootsandrings.vercel.app",
-  "https://rootsandrings-admin.vercel.app"
+  "http://localhost:3000"
 ];
+
+// Support environment-based allowed origins (split by comma if defined)
+if (process.env.ALLOWED_ORIGINS) {
+  const envOrigins = process.env.ALLOWED_ORIGINS.split(",").map(o => o.trim());
+  envOrigins.forEach(origin => {
+    if (origin && !allowedOrigins.includes(origin)) {
+      allowedOrigins.push(origin);
+    }
+  });
+}
 
 const corsOptions = {
   origin: (origin, callback) => {
@@ -51,7 +58,12 @@ const corsOptions = {
   },
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept"],
+  allowedHeaders: [
+    "Content-Type", 
+    "Authorization", 
+    "X-Requested-With", 
+    "Accept"
+  ],
   optionsSuccessStatus: 200, // Handle legacy browsers and Render proxy preflight stripping
   maxAge: 86400 // Cache preflight requests for 24 hours
 };
