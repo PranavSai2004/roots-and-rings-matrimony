@@ -23,30 +23,41 @@ const app = express();
 app.set('trust proxy', 1); // Trust the Render proxy
 
 app.use(helmet());
-app.use(cors({
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://localhost:5174",
+  "http://localhost:3000",
+  "https://roots-and-rings.vercel.app",
+  "https://roots-and-rings-admin.vercel.app",
+  "https://roots-and-rings-client.vercel.app",
+  "https://rootsandrings.vercel.app",
+  "https://rootsandrings-admin.vercel.app"
+];
+
+const corsOptions = {
   origin: (origin, callback) => {
-    // Allow requests with no origin (like mobile apps, postman, curl)
+    // Allow requests with no origin (like mobile apps, curl, postman)
     if (!origin) return callback(null, true);
 
-    const allowedOrigins = [
-      'http://localhost:5173',
-      'http://localhost:5174',
-      'http://localhost:3000'
-    ];
-
     const isAllowed = allowedOrigins.includes(origin) || 
-                      origin.endsWith('.vercel.app') || 
-                      origin.includes('rootsandrings');
+                      (origin.endsWith(".vercel.app") && 
+                       (origin.includes("roots-and-rings") || origin.includes("rootsandrings")));
 
     if (isAllowed) {
       callback(null, true);
     } else {
-      callback(new Error('Not allowed by CORS'));
+      callback(null, false); // Return false to block origin without throwing a 500 error
     }
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-}));
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept"],
+  optionsSuccessStatus: 200, // Handle legacy browsers and Render proxy preflight stripping
+  maxAge: 86400 // Cache preflight requests for 24 hours
+};
+
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 // Custom sanitization for Express 5 (Avoids req.query getter issue)
