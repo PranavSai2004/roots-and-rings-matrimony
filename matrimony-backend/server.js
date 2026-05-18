@@ -81,34 +81,29 @@ origin: function (origin, callback) {
 if (!origin) {
 return callback(null, true);
 }
+    // Allow exact origins
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
 
-```
-// Allow exact origins
-if (allowedOrigins.includes(origin)) {
-  return callback(null, true);
-}
+    // Allow ALL Vercel preview deployments
+    const isVercelPreview =
+      origin.endsWith(".vercel.app") &&
+      (
+        origin.includes("roots-and-rings") ||
+        origin.includes("rootsandrings")
+      );
 
-// Allow ALL Vercel preview deployments
-const isVercelPreview =
-  origin.endsWith(".vercel.app") &&
-  (
-    origin.includes("roots-and-rings") ||
-    origin.includes("rootsandrings")
-  );
+    if (isVercelPreview) {
+      return callback(null, true);
+    }
 
-if (isVercelPreview) {
-  return callback(null, true);
-}
+    console.error("CORS BLOCKED:", origin);
 
-console.error("CORS BLOCKED:", origin);
-
-return callback(
-  new Error("CORS blocked for origin: " + origin)
-);
-
-```
-
-},
+    return callback(
+      new Error("CORS blocked for origin: " + origin)
+    );
+  },
 
 credentials: true,
 

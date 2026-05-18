@@ -29,7 +29,7 @@ export const SearchProfilesScreen = () => {
     if (!url) return '';
     if (url.startsWith('http://') || url.startsWith('https://')) return url;
     const cleanPath = url.startsWith('/') ? url.slice(1) : url;
-    return `http://localhost:5000/${cleanPath}`;
+    return `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'}/${cleanPath}`;
   };
 
   const searchProfiles = async () => {
