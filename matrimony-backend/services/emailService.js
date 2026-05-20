@@ -221,7 +221,11 @@ const sendViaResend = async ({ to, subject, text, html }) => {
 
   if (!response.ok) {
     const body = await response.text();
-    const error = createError('Resend API error', response.status);
+    const isSenderError = response.status === 403 && body.toLowerCase().includes('from');
+    const errorMessage = isSenderError
+      ? 'Resend sender not verified'
+      : 'Resend API error';
+    const error = createError(errorMessage, response.status);
     error.response = body;
     throw error;
   }
@@ -368,6 +372,12 @@ const sendEmailOTP = async (email, mobile) => {
   } catch (error) {
     console.error('❌ Email OTP Error:', error.message);
     const statusCode = error.statusCode || 500;
+    if (error.response) {
+      console.error('EMAIL_PROVIDER_RESPONSE', {
+        statusCode,
+        response: error.response,
+      });
+    }
     if (statusCode >= 500) {
       console.error('EMAIL_SEND_FAILED', {
         message: error.message,
