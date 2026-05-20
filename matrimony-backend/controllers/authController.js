@@ -64,7 +64,11 @@ exports.sendEmailOTP = async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Send Email OTP Error:', error.message);
-    return res.status(500).json({ success: false, message: error.message || 'Failed to send OTP' });
+    const statusCode = error.statusCode || 500;
+    const message = statusCode >= 500
+      ? 'Email service unavailable. Please try again later.'
+      : error.message || 'Failed to send OTP';
+    return res.status(statusCode).json({ success: false, message });
   }
 };
 

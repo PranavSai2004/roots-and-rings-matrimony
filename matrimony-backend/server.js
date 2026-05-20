@@ -6,6 +6,7 @@ const helmet = require("helmet");
 dotenv.config();
 
 const connectDB = require("./config/db");
+const { initEmailService } = require("./services/emailService");
 
 // Initialize cron jobs
 require("./cron/expiryCron");
@@ -135,6 +136,7 @@ optionsSuccessStatus: 200,
 // IMPORTANT:
 // CORS MUST COME BEFORE ROUTES
 app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 
 
 // ========================================
@@ -147,6 +149,9 @@ app.use(cors(corsOptions));
 // ========================================
 
 connectDB();
+initEmailService().catch((error) => {
+console.error("EMAIL_INIT_ERROR:", error.message);
+});
 
 // ========================================
 // HEALTH CHECK

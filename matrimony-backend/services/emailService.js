@@ -2,18 +2,133 @@ const nodemailer = require('nodemailer');
 const bcrypt = require('bcrypt');
 const OTP = require('../models/OTP');
 
-const OTP_EXPIRY_MINUTES = parseInt(process.env.OTP_EXPIRY_MINUTES) || 10;
-const OTP_MAX_ATTEMPTS = parseInt(process.env.OTP_MAX_ATTEMPTS) || 5;
+const OTP_EXPIRY_MINUTES = parseInt(process.env.OTP_EXPIRY_MINUTES, 10) || 10;
+const OTP_MAX_ATTEMPTS = parseInt(process.env.OTP_MAX_ATTEMPTS, 10) || 5;
+const EMAIL_SEND_TIMEOUT_MS = parseInt(process.env.EMAIL_SEND_TIMEOUT_MS, 10) || 15000;
 
-// Create reusable transporter
-const createTransporter = () => {
-  return nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
+let transporter = null;
+let transporterReady = false;
+let transporterConfig = null;
+
+const createError = (message, statusCode) => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+};
+
+const getEmailConfig = () => {
+  const hasSmtpEnv =
+    process.env.SMTP_HOST ||
+    process.env.SMTP_PORT ||
+    process.env.SMTP_USER ||
+    process.env.SMTP_PASS;
+
+  if (hasSmtpEnv) {
+    const port = parseInt(process.env.SMTP_PORT || '587', 10);
+    const secure = process.env.SMTP_SECURE === 'true' || port === 465;
+
+    return {
+      provider: 'smtp',
+      host: process.env.SMTP_HOST,
+      port,
+      secure,
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+      from: process.env.EMAIL_FROM || process.env.SMTP_USER,
+    };
+  }
+
+  if (process.env.EMAIL_USER && process.env.EMAIL_APP_PASSWORD) {
+    return {
+      provider: 'gmail',
+      host: 'smtp.gmail.com',
+      port: 465,
+      secure: true,
       user: process.env.EMAIL_USER,
       pass: process.env.EMAIL_APP_PASSWORD,
+      from: process.env.EMAIL_FROM || process.env.EMAIL_USER,
+    };
+  }
+
+  return null;
+};
+
+const validateEmailConfig = (config) => {
+  if (!config) {
+    return ['SMTP_HOST/SMTP_USER/SMTP_PASS or EMAIL_USER/EMAIL_APP_PASSWORD'];
+  }
+
+  const missing = [];
+  if (!config.host) missing.push('SMTP_HOST');
+  if (!config.port) missing.push('SMTP_PORT');
+  if (!config.user) missing.push(config.provider === 'gmail' ? 'EMAIL_USER' : 'SMTP_USER');
+  if (!config.pass) missing.push(config.provider === 'gmail' ? 'EMAIL_APP_PASSWORD' : 'SMTP_PASS');
+  if (!config.from) missing.push('EMAIL_FROM');
+  return missing;
+};
+
+const createTransporter = (config) => {
+  return nodemailer.createTransport({
+    host: config.host,
+    port: config.port,
+    secure: config.secure,
+    auth: {
+      user: config.user,
+      pass: config.pass,
+    },
+    requireTLS: !config.secure,
+    connectionTimeout: EMAIL_SEND_TIMEOUT_MS,
+    greetingTimeout: EMAIL_SEND_TIMEOUT_MS,
+    socketTimeout: EMAIL_SEND_TIMEOUT_MS,
+    tls: {
+      minVersion: 'TLSv1.2',
     },
   });
+};
+
+const withTimeout = (promise, timeoutMs, errorMessage) => {
+  let timeoutId;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(createError(errorMessage, 504));
+    }, timeoutMs);
+  });
+
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    clearTimeout(timeoutId);
+  });
+};
+
+const initEmailService = async () => {
+  transporterConfig = getEmailConfig();
+  const missing = validateEmailConfig(transporterConfig);
+
+  if (missing.length) {
+    transporter = null;
+    transporterReady = false;
+    console.error('EMAIL_CONFIG_MISSING', { missing });
+    return;
+  }
+
+  transporter = createTransporter(transporterConfig);
+
+  try {
+    await withTimeout(transporter.verify(), EMAIL_SEND_TIMEOUT_MS, 'SMTP verify timeout');
+    transporterReady = true;
+    console.log('✅ Email transporter verified', {
+      provider: transporterConfig.provider,
+      host: transporterConfig.host,
+      port: transporterConfig.port,
+      secure: transporterConfig.secure,
+    });
+  } catch (error) {
+    transporterReady = false;
+    console.error('EMAIL_TRANSPORT_VERIFY_FAILED', {
+      message: error.message,
+      code: error.code,
+      command: error.command,
+    });
+  }
 };
 
 // Generate 6-digit OTP
@@ -23,7 +138,7 @@ const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString()
 const sendEmailOTP = async (email, mobile) => {
   try {
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      throw new Error('Invalid email address');
+      throw createError('Invalid email address', 400);
     }
 
     // Rate limit: no resend within 60 seconds
@@ -34,13 +149,19 @@ const sendEmailOTP = async (email, mobile) => {
     });
 
     if (recentOTP) {
-      throw new Error('OTP already sent. Please wait 60 seconds before requesting again.');
+      throw createError('OTP already sent. Please wait 60 seconds before requesting again.', 429);
     }
 
     const plainOTP = generateOTP();
     const hashedOTP = await bcrypt.hash(plainOTP, 10);
 
-    const transporter = createTransporter();
+    if (!transporter) {
+      await initEmailService();
+    }
+
+    if (!transporter || !transporterReady) {
+      throw createError('Email service unavailable', 502);
+    }
 
     const mailOptions = {
       from: `"Roots & Rings" <${process.env.EMAIL_USER}>`,
@@ -69,7 +190,11 @@ const sendEmailOTP = async (email, mobile) => {
       `,
     };
 
-    await transporter.sendMail(mailOptions);
+    await withTimeout(
+      transporter.sendMail(mailOptions),
+      EMAIL_SEND_TIMEOUT_MS,
+      'Email send timeout'
+    );
 
     // Save hashed OTP to DB
     await OTP.create({
@@ -88,7 +213,16 @@ const sendEmailOTP = async (email, mobile) => {
     };
   } catch (error) {
     console.error('❌ Email OTP Error:', error.message);
-    throw new Error(error.message || 'Failed to send OTP email');
+    const statusCode = error.statusCode || 500;
+    if (statusCode >= 500) {
+      console.error('EMAIL_SEND_FAILED', {
+        message: error.message,
+        code: error.code,
+        command: error.command,
+        response: error.response,
+      });
+    }
+    throw createError(error.message || 'Failed to send OTP email', statusCode);
   }
 };
 
@@ -136,4 +270,4 @@ const verifyEmailOTP = async (mobile, enteredOTP) => {
   }
 };
 
-module.exports = { sendEmailOTP, verifyEmailOTP };
+module.exports = { sendEmailOTP, verifyEmailOTP, initEmailService };
