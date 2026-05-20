@@ -5,6 +5,7 @@ const OTP = require('../models/OTP');
 const OTP_EXPIRY_MINUTES = parseInt(process.env.OTP_EXPIRY_MINUTES, 10) || 10;
 const OTP_MAX_ATTEMPTS = parseInt(process.env.OTP_MAX_ATTEMPTS, 10) || 5;
 const EMAIL_SEND_TIMEOUT_MS = parseInt(process.env.EMAIL_SEND_TIMEOUT_MS, 10) || 15000;
+const EMAIL_RETRY_LIMIT = parseInt(process.env.EMAIL_RETRY_LIMIT, 10) || 1;
 
 let transporter = null;
 let transporterReady = false;
@@ -17,6 +18,22 @@ const createError = (message, statusCode) => {
 };
 
 const getEmailConfig = () => {
+  if (process.env.RESEND_API_KEY) {
+    return {
+      provider: 'resend',
+      apiKey: process.env.RESEND_API_KEY,
+      from: process.env.EMAIL_FROM,
+    };
+  }
+
+  if (process.env.SENDGRID_API_KEY) {
+    return {
+      provider: 'sendgrid',
+      apiKey: process.env.SENDGRID_API_KEY,
+      from: process.env.EMAIL_FROM,
+    };
+  }
+
   const hasSmtpEnv =
     process.env.SMTP_HOST ||
     process.env.SMTP_PORT ||
@@ -40,10 +57,10 @@ const getEmailConfig = () => {
 
   if (process.env.EMAIL_USER && process.env.EMAIL_APP_PASSWORD) {
     return {
-      provider: 'gmail',
-      host: 'smtp.gmail.com',
-      port: 465,
-      secure: true,
+      provider: 'gmail-smtp',
+      host: process.env.GMAIL_SMTP_HOST || 'smtp.gmail.com',
+      port: parseInt(process.env.GMAIL_SMTP_PORT || '465', 10),
+      secure: process.env.GMAIL_SMTP_SECURE === 'true' || !process.env.GMAIL_SMTP_PORT,
       user: process.env.EMAIL_USER,
       pass: process.env.EMAIL_APP_PASSWORD,
       from: process.env.EMAIL_FROM || process.env.EMAIL_USER,
@@ -55,14 +72,21 @@ const getEmailConfig = () => {
 
 const validateEmailConfig = (config) => {
   if (!config) {
-    return ['SMTP_HOST/SMTP_USER/SMTP_PASS or EMAIL_USER/EMAIL_APP_PASSWORD'];
+    return ['RESEND_API_KEY/SENDGRID_API_KEY or SMTP_HOST/SMTP_USER/SMTP_PASS or EMAIL_USER/EMAIL_APP_PASSWORD'];
   }
 
   const missing = [];
+
+  if (config.provider === 'resend' || config.provider === 'sendgrid') {
+    if (!config.apiKey) missing.push(config.provider === 'resend' ? 'RESEND_API_KEY' : 'SENDGRID_API_KEY');
+    if (!config.from) missing.push('EMAIL_FROM');
+    return missing;
+  }
+
   if (!config.host) missing.push('SMTP_HOST');
   if (!config.port) missing.push('SMTP_PORT');
-  if (!config.user) missing.push(config.provider === 'gmail' ? 'EMAIL_USER' : 'SMTP_USER');
-  if (!config.pass) missing.push(config.provider === 'gmail' ? 'EMAIL_APP_PASSWORD' : 'SMTP_PASS');
+  if (!config.user) missing.push(config.provider === 'gmail-smtp' ? 'EMAIL_USER' : 'SMTP_USER');
+  if (!config.pass) missing.push(config.provider === 'gmail-smtp' ? 'EMAIL_APP_PASSWORD' : 'SMTP_PASS');
   if (!config.from) missing.push('EMAIL_FROM');
   return missing;
 };
@@ -107,6 +131,15 @@ const initEmailService = async () => {
     transporter = null;
     transporterReady = false;
     console.error('EMAIL_CONFIG_MISSING', { missing });
+    throw createError('Email configuration missing', 500);
+  }
+
+  if (transporterConfig.provider === 'resend' || transporterConfig.provider === 'sendgrid') {
+    transporter = null;
+    transporterReady = true;
+    console.log('✅ Email provider configured', {
+      provider: transporterConfig.provider,
+    });
     return;
   }
 
@@ -128,6 +161,99 @@ const initEmailService = async () => {
       code: error.code,
       command: error.command,
     });
+  }
+};
+
+const isRetryableError = (error) => {
+  if (!error) return false;
+  const retryableCodes = new Set([
+    'ETIMEDOUT',
+    'ECONNECTION',
+    'ECONNRESET',
+    'EHOSTUNREACH',
+    'ENETUNREACH',
+    'ESOCKET',
+  ]);
+  return retryableCodes.has(error.code) || error.statusCode === 504;
+};
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const sendWithRetry = async (sendFn) => {
+  let attempt = 0;
+  let lastError = null;
+
+  while (attempt <= EMAIL_RETRY_LIMIT) {
+    try {
+      return await sendFn();
+    } catch (error) {
+      lastError = error;
+      if (!isRetryableError(error) || attempt === EMAIL_RETRY_LIMIT) {
+        throw error;
+      }
+      await sleep(400 * (attempt + 1));
+    }
+    attempt += 1;
+  }
+
+  throw lastError;
+};
+
+const sendViaResend = async ({ to, subject, text, html }) => {
+  const response = await withTimeout(
+    fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${transporterConfig.apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: transporterConfig.from,
+        to,
+        subject,
+        text,
+        html,
+      }),
+    }),
+    EMAIL_SEND_TIMEOUT_MS,
+    'Email send timeout'
+  );
+
+  if (!response.ok) {
+    const body = await response.text();
+    const error = createError('Resend API error', response.status);
+    error.response = body;
+    throw error;
+  }
+};
+
+const sendViaSendGrid = async ({ to, subject, text, html }) => {
+  const response = await withTimeout(
+    fetch('https://api.sendgrid.com/v3/mail/send', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${transporterConfig.apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        personalizations: [{ to: [{ email: to }] }],
+        from: { email: transporterConfig.from },
+        subject,
+        content: [
+          { type: 'text/plain', value: text },
+          { type: 'text/html', value: html },
+        ],
+      }),
+    }),
+    EMAIL_SEND_TIMEOUT_MS,
+    'Email send timeout'
+  );
+
+  if (!response.ok) {
+    const body = await response.text();
+    const error = createError('SendGrid API error', response.status);
+    error.response = body;
+    throw error;
   }
 };
 
@@ -155,21 +281,17 @@ const sendEmailOTP = async (email, mobile) => {
     const plainOTP = generateOTP();
     const hashedOTP = await bcrypt.hash(plainOTP, 10);
 
-    if (!transporter) {
+    if (!transporterConfig) {
       await initEmailService();
     }
 
-    if (!transporter || !transporterReady) {
-      throw createError('Email service unavailable', 502);
+    if (!transporterConfig) {
+      throw createError('Email configuration missing', 500);
     }
 
-    const mailOptions = {
-      from: `"Roots & Rings" <${process.env.EMAIL_USER}>`,
-      replyTo: process.env.EMAIL_USER,
-      to: email,
-      subject: `${plainOTP} is your Roots & Rings OTP`,
-      text: `Your Roots & Rings OTP is: ${plainOTP}\n\nThis code expires in ${OTP_EXPIRY_MINUTES} minutes.\nNever share this code with anyone.\n\nIf you did not request this, ignore this email.`,
-      html: `
+    const subject = `${plainOTP} is your Roots & Rings OTP`;
+    const text = `Your Roots & Rings OTP is: ${plainOTP}\n\nThis code expires in ${OTP_EXPIRY_MINUTES} minutes.\nNever share this code with anyone.\n\nIf you did not request this, ignore this email.`;
+    const html = `
         <div style="font-family: 'Poppins', Arial, sans-serif; max-width: 480px; margin: 0 auto; background: #020817; color: #e8e8e8; border-radius: 12px; overflow: hidden; border: 1px solid rgba(198,166,74,0.2);">
           <div style="background: linear-gradient(135deg, #020817 0%, #072047 100%); padding: 32px 32px 24px; text-align: center; border-bottom: 1px solid rgba(198,166,74,0.15);">
             <h1 style="margin: 0; font-size: 24px; color: #C6A64A; letter-spacing: 1px;">Roots &amp; Rings</h1>
@@ -187,14 +309,46 @@ const sendEmailOTP = async (email, mobile) => {
             <p style="margin: 0; font-size: 11px; color: #666;">If you did not request this, please ignore this email.</p>
           </div>
         </div>
-      `,
-    };
+      `;
 
-    await withTimeout(
-      transporter.sendMail(mailOptions),
-      EMAIL_SEND_TIMEOUT_MS,
-      'Email send timeout'
-    );
+    if (transporterConfig.provider === 'resend') {
+      await sendWithRetry(() => sendViaResend({
+        to: email,
+        subject,
+        text,
+        html,
+      }));
+    } else if (transporterConfig.provider === 'sendgrid') {
+      await sendWithRetry(() => sendViaSendGrid({
+        to: email,
+        subject,
+        text,
+        html,
+      }));
+    } else {
+      if (!transporter) {
+        await initEmailService();
+      }
+
+      if (!transporter || !transporterReady) {
+        throw createError('Email service unavailable', 502);
+      }
+
+      const mailOptions = {
+        from: `"Roots & Rings" <${transporterConfig.from}>`,
+        replyTo: transporterConfig.from,
+        to: email,
+        subject,
+        text,
+        html,
+      };
+
+      await sendWithRetry(() => withTimeout(
+        transporter.sendMail(mailOptions),
+        EMAIL_SEND_TIMEOUT_MS,
+        'Email send timeout'
+      ));
+    }
 
     // Save hashed OTP to DB
     await OTP.create({

@@ -150,6 +150,9 @@ app.use(cors(corsOptions));
 connectDB();
 initEmailService().catch((error) => {
 console.error("EMAIL_INIT_ERROR:", error.message);
+if (error.message === "Email configuration missing") {
+process.exit(1);
+}
 });
 
 // ========================================
