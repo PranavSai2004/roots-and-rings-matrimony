@@ -65,9 +65,14 @@ exports.sendEmailOTP = async (req, res) => {
   } catch (error) {
     console.error('❌ Send Email OTP Error:', error.message);
     const statusCode = error.statusCode || 500;
-    const message = statusCode >= 500
+    
+    // Check for Resend Sandbox/Testing restriction
+    const isDomainError = error.message && error.message.includes('Resend Domain Unverified');
+    
+    const message = statusCode >= 500 
       ? 'Email service unavailable. Please try again later.'
-      : error.message || 'Failed to send OTP';
+      : (isDomainError ? error.message : (error.message || 'Failed to send OTP'));
+      
     return res.status(statusCode).json({ success: false, message });
   }
 };

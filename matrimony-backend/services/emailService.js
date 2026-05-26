@@ -221,10 +221,25 @@ const sendViaResend = async ({ to, subject, text, html }) => {
 
   if (!response.ok) {
     const body = await response.text();
-    const isSenderError = response.status === 403 && body.toLowerCase().includes('from');
-    const errorMessage = isSenderError
-      ? 'Resend sender not verified'
-      : 'Resend API error';
+    let errorMessage = 'Resend API error';
+    
+    // Parse Resend JSON error if possible
+    try {
+      const parsed = JSON.parse(body);
+      if (parsed && parsed.message) {
+        // Handle unverified domain / sandbox restriction
+        if (response.status === 403 && parsed.message.includes('testing emails')) {
+          errorMessage = 'Resend Domain Unverified: You can only send to your own email address. Add and verify your custom domain in the Resend dashboard to send to real users.';
+        } else {
+          errorMessage = parsed.message;
+        }
+      }
+    } catch (e) {
+      if (response.status === 403 && body.toLowerCase().includes('from')) {
+        errorMessage = 'Resend sender not verified';
+      }
+    }
+    
     const error = createError(errorMessage, response.status);
     error.response = body;
     throw error;
