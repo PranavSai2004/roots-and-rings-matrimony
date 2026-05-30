@@ -244,6 +244,20 @@ const sendViaResend = async ({ to, subject, text, html }) => {
     error.response = body;
     throw error;
   }
+
+  try {
+    const payload = await response.json();
+    console.log('EMAIL_PROVIDER_RESPONSE', {
+      provider: 'resend',
+      statusCode: response.status,
+      response: payload,
+    });
+  } catch (error) {
+    console.log('EMAIL_PROVIDER_RESPONSE', {
+      provider: 'resend',
+      statusCode: response.status,
+    });
+  }
 };
 
 const sendViaSendGrid = async ({ to, subject, text, html }) => {
@@ -329,6 +343,13 @@ const sendEmailOTP = async (email, mobile) => {
           </div>
         </div>
       `;
+
+    console.log('EMAIL_SEND_ATTEMPT', {
+      provider: transporterConfig.provider,
+      from: transporterConfig.from,
+      to: email,
+      subject,
+    });
 
     if (transporterConfig.provider === 'resend') {
       await sendWithRetry(() => sendViaResend({
