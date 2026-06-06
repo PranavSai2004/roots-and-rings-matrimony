@@ -140,6 +140,7 @@ optionsSuccessStatus: 200,
 
 // IMPORTANT:
 // CORS MUST COME BEFORE ROUTES
+app.use(cors(corsOptions));
 app.options(/.*/, cors(corsOptions));
 
 
