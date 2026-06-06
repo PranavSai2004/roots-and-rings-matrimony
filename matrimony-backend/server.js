@@ -52,16 +52,20 @@ app.use(express.urlencoded({ extended: true }));
 // ========================================
 
 const allowedOrigins = [
-// Production Frontend
-"https://roots-and-rings-matrimony.vercel.app",
+  // Main Production Website
+  "https://rootsandringsmatrimony.in",
+  "https://www.rootsandringsmatrimony.in",
 
-// Production Admin
-"https://roots-and-rings-admin.vercel.app",
+  // Vercel Production
+  "https://roots-and-rings-matrimony.vercel.app",
 
-// Local Development
-"http://localhost:5173",
-"http://localhost:5174",
-"http://localhost:3000",
+  // Admin
+  "https://roots-and-rings-admin.vercel.app",
+
+  // Local
+  "http://localhost:5173",
+  "http://localhost:5174",
+  "http://localhost:3000",
 ];
 
 // Add additional origins from ENV
@@ -79,6 +83,7 @@ const corsOptions = {
 origin: function (origin, callback) {
 // Allow requests with no origin
 // (Postman, mobile apps, curl, server-server)
+console.log("REQUEST ORIGIN:", origin);
 if (!origin) {
 return callback(null, true);
 }
@@ -135,7 +140,7 @@ optionsSuccessStatus: 200,
 
 // IMPORTANT:
 // CORS MUST COME BEFORE ROUTES
-app.use(cors(corsOptions));
+app.options(/.*/, cors(corsOptions));
 
 
 // ========================================
