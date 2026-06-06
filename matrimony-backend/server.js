@@ -55,6 +55,7 @@ const allowedOrigins = [
   // Main Production Website
   "https://rootsandringsmatrimony.in",
   "https://www.rootsandringsmatrimony.in",
+  "https://admin.rootsandringsmatrimony.in",
 
   // Vercel Production
   "https://roots-and-rings-matrimony.vercel.app",
